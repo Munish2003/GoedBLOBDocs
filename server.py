@@ -708,4 +708,4 @@ async def generate_read_sas(request: ReadSASRequest):
         raise HTTPException(status_code=500, detail=f"Failed to generate read SAS: {str(e)}")
 
 
-    uvicorn server:app --host 0.0.0.0 --port $PORT
+
