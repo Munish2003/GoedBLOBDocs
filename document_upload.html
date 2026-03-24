@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Secure Document Management</title>
+    <style>
+        /* Modern, Dataverse-native (Fluent UI) styling */
+        :root {
+            --primary-color: #0f6cbd;
+            --primary-hover: #115ea3;
+            --text-main: #242424;
+            --text-muted: #616161;
+            --border-color: #d1d1d1;
+            --bg-light: #faf9f8;
+            --success-color: #107c10;
+            --success-bg: #dff6dd;
+            --error-color: #a4262c;
+            --error-bg: #fde7e9;
+            --info-color: #005a9e;
+            --info-bg: #e7f4ff;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            margin: 0;
+            padding: 12px;
+            background-color: transparent;
+            color: var(--text-main);
+        }
+
+        .upload-card {
+            background-color: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .current-file-section {
+            background-color: var(--bg-light);
+            border-radius: 4px;
+            padding: 12px;
+            border: 1px dashed #c8c8c8;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0;
+        }
+
+        /* Displays the raw zx_url value */
+        .raw-url-display {
+            font-size: 12px;
+            font-family: monospace;
+            color: var(--text-muted);
+            background-color: #eeeeee;
+            padding: 4px 8px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+
+        .no-file {
+            color: var(--text-muted);
+            font-style: italic;
+            font-size: 14px;
+        }
+
+        .document-link {
+            color: var(--primary-color);
+            text-decoration: none;
+            cursor: pointer;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+        }
+
+        .document-link:hover {
+            color: var(--primary-hover);
+            text-decoration: underline;
+        }
+
+        .upload-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        input[type="file"] {
+            font-size: 14px;
+            padding: 6px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            width: 100%;
+            box-sizing: border-box;
+            background-color: var(--bg-light);
+        }
+
+        button.primary-btn {
+            align-self: flex-start;
+            padding: 8px 20px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button.primary-btn:hover:not(:disabled) {
+            background-color: var(--primary-hover);
+        }
+
+        button.primary-btn:disabled {
+            background-color: #c8c8c8;
+            cursor: not-allowed;
+        }
+
+        #statusMessage {
+            font-size: 13px;
+            font-weight: 500;
+            padding: 10px 12px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .status-success {
+            display: block !important;
+            color: var(--success-color);
+            background-color: var(--success-bg);
+            border-left: 4px solid var(--success-color);
+        }
+
+        .status-error {
+            display: block !important;
+            color: var(--error-color);
+            background-color: var(--error-bg);
+            border-left: 4px solid var(--error-color);
+        }
+
+        .status-info {
+            display: block !important;
+            color: var(--info-color);
+            background-color: var(--info-bg);
+            border-left: 4px solid var(--info-color);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="upload-card">
+
+        <div class="current-file-section">
+            <h4 class="section-title">Current Stored Document</h4>
+            <div id="currentFilePath">
+                <span class="no-file">Loading data...</span>
+            </div>
+        </div>
+
+        <div class="upload-controls">
+            <h4 class="section-title">Upload / Replace Document</h4>
+            <input type="file" id="documentFile" accept=".pdf,.docx,.pptx" />
+            <button id="btnUpload" class="primary-btn" onclick="processUpload()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Upload to Azure
+            </button>
+        </div>
+
+        <div id="statusMessage"></div>
+    </div>
+
+    <script>
+        const BACKEND_BASE_URL = "http://localhost:8002";
+        const BACKEND_UPLOAD_URL = BACKEND_BASE_URL + "/blob/upload-sas";
+        const BACKEND_READ_URL = BACKEND_BASE_URL + "/blob/read-sas";
+        const BACKEND_INSERT_URL = BACKEND_BASE_URL + "/insert-from-blob";
+
+        const MAX_FILE_SIZE_MB = 15;
+        const ALLOWED_EXTENSIONS = [".pdf", ".docx", ".pptx"];
+        const EXTENSION_TO_TYPE = { ".pdf": "pdf", ".docx": "docx", ".pptx": "pptx" };
+
+        let loadRetries = 0;
+
+        window.onload = function () {
+            loadCurrentDocumentUrl();
+        };
+
+        function loadCurrentDocumentUrl() {
+            const displayEl = document.getElementById("currentFilePath");
+            try {
+                const Xrm = window.parent.Xrm;
+                if (!Xrm || !Xrm.Page) {
+                    displayEl.innerHTML = '<span class="no-file" style="color:red;">Error: Cannot access Dataverse context.</span>';
+                    return;
+                }
+                const formContext = Xrm.Page;
+
+                const urlAttribute = formContext.getAttribute("zx_url");
+                if (!urlAttribute) {
+                    displayEl.innerHTML = `<div style="color: #a4262c; background-color: #fde7e9; padding: 8px; border-radius: 4px; font-size: 12px;"><strong>⚠️ Logical Name Error:</strong> Could not find <code>zx_url</code>. Ensure it is placed on the form.</div>`;
+                    return;
+                }
+
+                const currentUrl = urlAttribute.getValue();
+
+                if (!currentUrl) {
+                    const formType = formContext.ui.getFormType();
+                    if (formType !== 1 && loadRetries < 8) {
+                        loadRetries++;
+                        displayEl.innerHTML = '<span class="no-file" style="color: #005a9e;">⏳ Synchronizing with form...</span>';
+                        setTimeout(loadCurrentDocumentUrl, 500);
+                        return;
+                    } else {
+                        displayEl.innerHTML = '<span class="no-file">No document uploaded yet.</span>';
+                        return;
+                    }
+                }
+
+                const fileNameOnly = currentUrl.split('/').pop().replace(/%20/g, " ");
+                displayEl.innerHTML = `
+                    <div class="raw-url-display"><strong>zx_url:</strong> ${currentUrl}</div>
+                    <a href="javascript:void(0)" onclick="openDocument('${currentUrl}')" class="document-link" title="Click to view secure document">
+                        📄 Open: ${fileNameOnly}
+                    </a>
+                `;
+            } catch (error) {
+                console.warn("Error reading zx_url:", error);
+                displayEl.innerHTML = `<span class="no-file" style="color:red;">Error loading document path.</span>`;
+            }
+        }
+
+        async function openDocument(blobPath) {
+            try {
+                showStatus("Requesting secure view link...", "status-info");
+                let cleanBlobPath = blobPath.replace("https://", "");
+                if (cleanBlobPath.startsWith("/")) cleanBlobPath = cleanBlobPath.substring(1);
+
+                const response = await fetch(BACKEND_READ_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ blob_path: cleanBlobPath })
+                });
+
+                if (!response.ok) throw new Error("Failed to get document URL.");
+                const data = await response.json();
+                const secureUrl = data.read_url || data.url;
+                if (!secureUrl) throw new Error("Backend did not return a valid URL.");
+
+                window.open(secureUrl, '_blank');
+                showStatus("Document opened securely.", "status-success");
+                setTimeout(() => { document.getElementById("statusMessage").className = ""; }, 3000);
+            } catch (error) {
+                showStatus(error.message, "status-error");
+            }
+        }
+
+        /**
+         * Get the file extension from a filename (lowercase, with dot).
+         */
+        function getFileExtension(fileName) {
+            const lastDot = fileName.lastIndexOf(".");
+            if (lastDot === -1) return "";
+            return fileName.substring(lastDot).toLowerCase();
+        }
+
+        async function processUpload() {
+            const fileInput = document.getElementById("documentFile");
+            const btnUpload = document.getElementById("btnUpload");
+
+            if (fileInput.files.length === 0) {
+                showStatus("Please select a file to upload.", "status-error");
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const fileExtension = getFileExtension(file.name);
+
+            // ── Client-side validation ──────────────────────────────────
+            if (!ALLOWED_EXTENSIONS.includes(fileExtension)) {
+                showStatus(`Invalid file type "${fileExtension}". Only PDF, DOCX, and PPTX are allowed.`, "status-error");
+                return;
+            }
+
+            if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+                showStatus(`File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_FILE_SIZE_MB} MB.`, "status-error");
+                return;
+            }
+
+            if (file.size === 0) {
+                showStatus("Selected file is empty (0 bytes).", "status-error");
+                return;
+            }
+            // ────────────────────────────────────────────────────────────
+
+            const formContext = window.parent.Xrm?.Page;
+
+            if (!formContext) return showStatus("Cannot access Dataverse form context.", "status-error");
+
+            let documentId = formContext.data.entity.getId()?.replace(/[{}]/g, "");
+            if (!documentId) return showStatus("Please save the record before uploading.", "status-error");
+
+            const collegeLookup = formContext.getAttribute("zx_collegeid")?.getValue();
+            if (!collegeLookup || !collegeLookup[0]) return showStatus("Please select a College before uploading.", "status-error");
+            const collegeId = collegeLookup[0].id.replace(/[{}]/g, "");
+
+            // ✅ STABLE NAMING: JUST record name (zx_name)
+            // This ensures every upload for THIS record uses the EXACT same blob name,
+            // which forces Azure to replace the old file.
+            const zxName = formContext.getAttribute("zx_name")?.getValue() || "document";
+            const documentType = EXTENSION_TO_TYPE[fileExtension];
+
+            try {
+                btnUpload.disabled = true;
+                btnUpload.innerHTML = '⏳ Uploading...';
+
+                // ── Step 1: Get SAS upload token ────────────────────────
+                showStatus("Step 1/4: Generating secure upload token...", "status-info");
+                const sasResponse = await fetch(BACKEND_UPLOAD_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        college_id: collegeId,
+                        document_id: documentId,
+                        file_name: zxName
+                    })
+                });
+
+                if (!sasResponse.ok) throw new Error("Backend error generating token.");
+                const sasData = await sasResponse.json();
+
+                // ── Step 2: Upload file to Azure Blob ───────────────────
+                showStatus("Step 2/4: Uploading file to Azure Blob...", "status-info");
+                const uploadResponse = await fetch(sasData.upload_url, {
+                    method: "PUT",
+                    headers: { "x-ms-blob-type": "BlockBlob", "Content-Type": file.type || "application/octet-stream" },
+                    body: file
+                });
+
+                if (!uploadResponse.ok) throw new Error("Blob upload failed.");
+
+                // ── Step 3: Insert/Update in Knowledge Base ─────────────
+                showStatus("Step 3/4: Processing document for AI knowledge base...", "status-info");
+                const insertResponse = await fetch(BACKEND_INSERT_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        document_id: documentId,
+                        blob_path: sasData.blob_path,
+                        document_name: zxName,
+                        document_type: documentType,
+                        source: "Product-AI"
+                    })
+                });
+
+                if (!insertResponse.ok) {
+                    const errData = await insertResponse.json().catch(() => ({}));
+                    throw new Error(errData.detail || "Knowledge base insert failed.");
+                }
+                const insertResult = await insertResponse.json();
+
+                // ── Step 4: Save blob path to Dataverse ─────────────────
+                showStatus("Step 4/4: Saving file path to Dataverse...", "status-info");
+                formContext.getAttribute("zx_url").setValue(sasData.blob_path);
+                await formContext.data.entity.save();
+
+                // ── Done ────────────────────────────────────────────────
+                const action = insertResult.was_update ? "updated" : "added";
+                showStatus(
+                    `✅ Upload successful! Document ${action} in knowledge base (${insertResult.total_chunks} chunks).`,
+                    "status-success"
+                );
+                fileInput.value = "";
+                loadRetries = 0;
+                loadCurrentDocumentUrl();
+
+            } catch (error) {
+                showStatus("❌ " + error.message, "status-error");
+            } finally {
+                btnUpload.disabled = false;
+                btnUpload.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg> Upload to Azure`;
+            }
+        }
+
+        function showStatus(message, type) {
+            const statusEl = document.getElementById("statusMessage");
+            statusEl.textContent = message;
+            statusEl.className = type;
+        }
+    </script>
+</body>
+
+</html>
